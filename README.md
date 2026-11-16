@@ -1,247 +1,69 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/MCU-nRF52832-blue?style=flat-square" alt="nRF52832"/>
-  <img src="https://img.shields.io/badge/RTOS-Zephyr-green?style=flat-square" alt="Zephyr"/>
-  <img src="https://img.shields.io/badge/SDK-nRF_Connect-red?style=flat-square" alt="nRF Connect SDK"/>
-  <img src="https://img.shields.io/badge/Protocol-BLE_UART-purple?style=flat-square" alt="BLE UART"/>
-  <img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="MIT"/>
-</p>
+# fw-nrf52832-ble-uart
 
-# nRF52832 DK - BLE UART (Nordic UART Service)
+BLE to UART bridge for the nRF52832 DK using the Nordic UART Service (NUS). Zephyr RTOS, nRF Connect SDK. It is the nRF52832 port of `fw-nrf52840-ble-uart`.
 
-Firmware para a **nRF52832 DK** que cria uma ponte bidirecional entre **UART (PuTTY)** e **Bluetooth Low Energy (BLE)**, utilizando o **Nordic UART Service (NUS)**.
+## What it does
 
-## O que faz
+Two-way text link between a serial terminal on a PC and a phone running nRF Connect:
 
 ```
-PuTTY (PC) ──UART──> nRF52832 ──BLE──> Celular (nRF Connect app)
-Celular    ──BLE───> nRF52832 ──UART──> PuTTY (PC)
+PC terminal <--UART--> nRF52832 DK <--BLE--> Phone (nRF Connect)
 ```
 
-- Digite no **PuTTY** e a mensagem aparece no **celular**
-- Digite no **celular** e a mensagem aparece no **PuTTY**
+- Text typed in the terminal is sent to the phone as a NUS notification when Enter is pressed.
+- Text written by the phone to the NUS RX characteristic appears in the terminal.
+- The device advertises as `nRF52832_BLE_UART`.
 
-### LEDs de Status
+LEDs: LED1 blinks while the firmware runs, LED2 is on while a BLE central is connected.
 
-| LED | Significado |
-|---|---|
-| LED1 piscando | Firmware rodando normalmente |
-| LED2 aceso | Dispositivo BLE conectado |
-| LED2 apagado | Nenhuma conexão BLE ativa |
+Design:
 
-## Demonstração
+- UART to BLE: UART RX uses the async API with DMA. Characters accumulate until `\r` or `\n`, then go through a FIFO to `ble_write_thread`, which calls `bt_nus_send()`.
+- BLE to UART: `bt_receive_cb()` calls `uart_tx()` directly.
 
-Ao gravar o firmware e abrir o PuTTY, você verá:
+Differences from the nRF52840 version, because of the 64 KB RAM:
 
-```
-==================================
-  nRF52832 BLE UART (NUS)
-==================================
-Aguardando conexão BLE...
-Nome: nRF52832_BLE_UART
-```
+| | nRF52840 | nRF52832 |
+|---|---|---|
+| Board | PCA10056 | PCA10040 |
+| Flash / RAM | 1 MB / 256 KB | 512 KB / 64 KB |
+| ACL buffer | 251 B | 128 B |
+| L2CAP MTU | 247 | 124 |
+| West board | `nrf52840dk/nrf52840` | `nrf52dk/nrf52832` |
 
-Após conectar pelo celular, as mensagens trafegam nos dois sentidos.
+Limitations: no local echo in the terminal, messages are sent only on Enter, about 20 characters per message at the default MTU.
 
 ## Hardware
 
-| Componente | Descrição |
+| Item | Detail |
 |---|---|
-| **Placa** | nRF52832 DK (PCA10040) |
-| **MCU** | nRF52832 (ARM Cortex-M4F, 64 MHz, 512 KB Flash, 64 KB RAM) |
-| **Radio** | Bluetooth 5.0 / BLE integrado |
-| **Interface UART** | VCOM via J-Link USB onboard |
+| Board | nRF52832 DK (PCA10040) |
+| MCU | nRF52832, Cortex-M4F, 64 MHz, 512 KB flash, 64 KB RAM |
+| UART | UART0 through the J-Link VCOM, 115200 8N1 (`nordic,nus-uart = &uart0` in `app.overlay`) |
+| Phone | Bluetooth 4.0 or newer, nRF Connect app |
 
-## Pré-requisitos
+## Build
 
-### Software
-
-- [nRF Connect SDK](https://www.nordicsemi.com/Products/Development-tools/nRF-Connect-SDK) v3.x (testado com v3.0.2)
-- [nRF Connect for Desktop](https://www.nordicsemi.com/Products/Development-tools/nRF-Connect-for-Desktop) com Toolchain Manager
-- Terminal serial: [PuTTY](https://www.putty.org/), minicom ou Tera Term
-
-### Hardware
-
-- nRF52832 DK (PCA10040) conectada via USB
-- Celular com Bluetooth 4.0+ e app **nRF Connect**:
-  - [Android](https://play.google.com/store/apps/details?id=no.nordicsemi.android.mcp)
-  - [iOS](https://apps.apple.com/app/nrf-connect-for-mobile/id1054362403)
-
-## Estrutura do Projeto
-
-```
-nrf52832_ble_uart/
-├── CMakeLists.txt      # Configuração de build CMake/Zephyr
-├── prj.conf            # Configuração do kernel (Kconfig)
-├── app.overlay         # Overlay do devicetree (define UART do NUS)
-├── src/
-│   └── main.c          # Código fonte principal (~420 linhas)
-├── .gitignore
-├── LICENSE
-└── README.md
-```
-
-## Como Compilar e Gravar
-
-### 1. Abra o terminal do nRF Connect SDK
-
-Use o terminal do **Toolchain Manager** ou a extensão **nRF Connect** no VS Code / Windsurf. O `west` precisa estar no PATH.
-
-### 2. Copie para um caminho sem espaços e compile
+Requires nRF Connect SDK v3.x. Use a project path without spaces.
 
 ```bash
-xcopy /E /I "C:\Users\...\Firmwares\nrf52832_ble_uart" C:\ncs\projects\nrf52832_ble_uart
-cd C:\ncs\projects\nrf52832_ble_uart
-west build -b nrf52dk/nrf52832 . --pristine
+west build -b nrf52dk/nrf52832 --pristine
 ```
 
-> **Nota:** O projeto deve estar em um caminho **sem espaços** (ex: `C:\ncs\projects\`). Caminhos como `C:\Users\Meu Nome\...` causam erro no CMake.
-
-### 3. Grave na placa
+## Flash
 
 ```bash
 west flash --runner jlink
 ```
 
-## Como Usar
+## Test
 
-### 1. Configurar o PuTTY
+1. Open a serial terminal on the DK's COM port: 115200 baud, 8N1, no flow control.
+2. In nRF Connect on the phone, scan and connect to `nRF52832_BLE_UART`. LED2 turns on.
+3. Open the Nordic UART Service and enable notifications on the TX characteristic (`6E400003-B5A3-F393-E0A9-E50E24DCCA9E`).
+4. Type text plus Enter in the terminal: it shows up on the TX characteristic.
+5. Write text to the RX characteristic (`6E400002-B5A3-F393-E0A9-E50E24DCCA9E`): it shows up in the terminal.
 
-Abra o Gerenciador de Dispositivos e encontre a porta COM da DK (ex: COM3, COM5).
+## License
 
-| Parâmetro | Valor |
-|---|---|
-| **Connection type** | Serial |
-| **Porta** | COMx (varia por PC) |
-| **Baud Rate** | 115200 |
-| **Data Bits** | 8 |
-| **Stop Bits** | 1 |
-| **Parity** | None |
-| **Flow Control** | None |
-
-### 2. Conectar pelo celular
-
-1. Abra o app **nRF Connect** no celular
-2. Toque em **Scan**
-3. Encontre **"nRF52832_BLE_UART"** e toque em **Connect**
-4. O **LED2** da DK acenderá (conexão estabelecida)
-5. Role até encontrar o serviço **Nordic UART Service** (UUID `6E400001-...`)
-6. Na **TX Characteristic** (UUID `6E400003-...`), toque no ícone de setas/sino para **habilitar notificações** — isso é obrigatório para receber mensagens do PuTTY
-7. Na **RX Characteristic** (UUID `6E400002-...`), toque na seta para cima para enviar mensagens para o PuTTY
-
-### 3. Testar a comunicação
-
-| Direção | Como testar |
-|---|---|
-| **PuTTY -> Celular** | Digite texto no PuTTY + **Enter**. A mensagem aparece na TX characteristic do app |
-| **Celular -> PuTTY** | Escreva na RX characteristic do app e envie. A mensagem aparece no PuTTY |
-
-## Diferenças em relação à versão nRF52840
-
-| Parâmetro | nRF52840 | nRF52832 |
-|---|---|---|
-| **Placa** | PCA10056 | PCA10040 |
-| **Flash** | 1 MB | 512 KB |
-| **RAM** | 256 KB | 64 KB |
-| **ACL Buffer** | 251 bytes | 128 bytes |
-| **L2CAP MTU** | 247 | 124 |
-| **Board (west)** | `nrf52840dk/nrf52840` | `nrf52dk/nrf52832` |
-
-Os buffers BLE foram reduzidos para caber na RAM de 64 KB do nRF52832.
-
-## Limitações Conhecidas
-
-| Limitação | Motivo |
-|---|---|
-| **Sem echo local no PuTTY** | O firmware não ecoa os caracteres digitados de volta. A digitação é "às cegas", mas a mensagem é enviada ao pressionar Enter |
-| **Limite de ~20 caracteres por mensagem** | Limitação do MTU padrão do BLE. Mensagens maiores são fragmentadas ou truncadas |
-| **Envio apenas com Enter** | O firmware acumula caracteres e só envia via BLE ao receber `\r` ou `\n` |
-
-## Detalhes Técnicos
-
-### Arquitetura
-
-O firmware usa dois caminhos de dados independentes:
-
-**UART -> BLE (Thread dedicada)**
-```
-Tecla no PuTTY
-  -> UART RX (async API com DMA)
-    -> Buffer acumula até \r ou \n
-      -> FIFO (fifo_uart_rx_data)
-        -> ble_write_thread
-          -> bt_nus_send()
-            -> BLE -> Celular
-```
-
-**BLE -> UART (Callback direto)**
-```
-Mensagem no app
-  -> BLE RX
-    -> bt_receive_cb()
-      -> uart_tx()
-        -> PuTTY
-```
-
-### Thread Model
-
-| Thread | Função | Stack | Prioridade |
-|---|---|---|---|
-| **main** | Init BLE/UART, pisca LED1 | default | 0 |
-| **ble_write_thread** | Le FIFO e envia via BLE | 1024 B | 7 |
-
-### Configurações Kconfig (prj.conf)
-
-```ini
-# Bluetooth
-CONFIG_BT=y                    # Habilita stack BLE
-CONFIG_BT_PERIPHERAL=y         # Modo periférico (aceita conexões)
-CONFIG_BT_NUS=y                # Nordic UART Service
-CONFIG_BT_DEVICE_NAME="nRF52832_BLE_UART"
-
-# BLE buffers (ajustado para 64KB RAM)
-CONFIG_BT_BUF_ACL_RX_SIZE=128
-CONFIG_BT_BUF_ACL_TX_SIZE=128
-CONFIG_BT_L2CAP_TX_MTU=124
-
-# UART
-CONFIG_SERIAL=y                # Driver serial
-CONFIG_UART_ASYNC_API=y        # API assíncrona (eventos + DMA)
-CONFIG_NRFX_UARTE0=y           # Driver nativo UARTE0
-CONFIG_UART_0_ASYNC=y           # Modo async para UART0
-
-# DK
-CONFIG_DK_LIBRARY=y            # Biblioteca de LEDs/botões
-
-# Logging via RTT (não UART, para não conflitar com NUS)
-CONFIG_LOG=y
-CONFIG_USE_SEGGER_RTT=y
-CONFIG_LOG_BACKEND_RTT=y
-CONFIG_UART_CONSOLE=n
-```
-
-### Overlay (app.overlay)
-
-```dts
-/ {
-    chosen {
-        nordic,nus-uart = &uart0;
-    };
-};
-```
-
-Define que o NUS usará a **UART0**, que no nRF52832 DK é roteada pela interface J-Link USB (VCOM), ou seja, a mesma porta que aparece no PuTTY.
-
-## Troubleshooting
-
-| Problema | Solução |
-|---|---|
-| Dispositivo não aparece no scan | Verifique se o firmware foi gravado corretamente. Resete a DK (botão RESET) |
-| Conexão BLE falha | Apague bonding antigo: `nrfjprog --eraseall` + `west flash --runner jlink`. No celular, esqueça o dispositivo nas configurações de Bluetooth |
-| PuTTY não mostra nada | Verifique a porta COM no Gerenciador de Dispositivos. Confirme baud rate 115200 |
-| Mensagens não chegam no celular | Habilite **notificações** na TX Characteristic do Nordic UART Service no app nRF Connect |
-| Erro de build com espaços no path | Mova o projeto para um caminho sem espaços, ex: `C:\ncs\projects\` |
-| `west: command not found` | Use o terminal do Toolchain Manager ou a extensão nRF Connect |
-
-## Licença
-
-MIT License - veja [LICENSE](LICENSE)
+MIT, see [LICENSE](LICENSE).
